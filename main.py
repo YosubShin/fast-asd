@@ -3,21 +3,34 @@ from utils import get_video_dimensions, get_video_length, create_video_segments
 from custom_types import VideoSegment, Frame, Box
 import threading
 import queue
+from yolov8_model import YOLOv8
+from talknet.main import TalkNetASD
+
+# Register the YOLOv8 model if it's not already registered
+if "sieve/yolov8" not in sieve.Model._registry:
+    sieve.Model(name="sieve/yolov8")(YOLOv8)
+
+# Register the TalkNet ASD model if it's not already registered
+if "sieve/talknet-asd" not in sieve.Model._registry:
+    sieve.Model(name="sieve/talknet-asd")(TalkNetASD)
 
 SPEAKER_DETECTION_MODEL = "sieve/talknet-asd"
 SPEAKER_DETECTION_IN_MEMORY_THRESHOLD = 3000
 OBJECT_DETECTION_MODEL = "sieve/yolov8"
 
+
 def push_video_segments_to_object_detection(video_segment, file, frame_interval=600, models="yolov8l, yolov8l-face", processing_fps=2):
     object_detector = sieve.function.get(OBJECT_DETECTION_MODEL)
     # push the video segments to object detection for every frame_interval frames
-    total_num_frames = video_segment.end_frame if video_segment.end_frame else int(video_segment.end * video_segment.fps())
-    start = video_segment.start_frame if video_segment.start_frame else int(video_segment.start * video_segment.fps())
+    total_num_frames = video_segment.end_frame if video_segment.end_frame else int(
+        video_segment.end * video_segment.fps())
+    start = video_segment.start_frame if video_segment.start_frame else int(
+        video_segment.start * video_segment.fps())
     sampled_box_outputs = []
     for i in range(start, total_num_frames, frame_interval):
         start_frame = i
         end_frame = min(i + frame_interval - 1, total_num_frames - 1)
-        
+
         sample_box_output = object_detector.push(
             file,
             confidence_threshold=0.25,
@@ -36,6 +49,7 @@ def push_video_segments_to_object_detection(video_segment, file, frame_interval=
 
     return sampled_box_outputs
 
+
 def get_active_speakers(speaker_frames, alpha=0.5, score_threshold=0):
     # smooth the scores of the boxes from the speaker detection model
     active_speakers = {}
@@ -52,21 +66,26 @@ def get_active_speakers(speaker_frames, alpha=0.5, score_threshold=0):
             if box_id not in smoothed_scores:
                 smoothed_scores[box_id] = raw_score
             else:
-                smoothed_scores[box_id] = alpha * raw_score + (1 - alpha) * smoothed_scores[box_id]
+                smoothed_scores[box_id] = alpha * raw_score + \
+                    (1 - alpha) * smoothed_scores[box_id]
 
             if smoothed_scores[box_id] > score_threshold:
-                active_speakers[frame_number].append(Box(class_id=-1, confidence=1.0, x1=box['x1'], y1=box['y1'], x2=box['x2'], y2=box['y2'], id=box_id, metadata={'raw_score': smoothed_scores[box_id]}))
+                active_speakers[frame_number].append(Box(class_id=-1, confidence=1.0, x1=box['x1'], y1=box['y1'],
+                                                     x2=box['x2'], y2=box['y2'], id=box_id, metadata={'raw_score': smoothed_scores[box_id]}))
 
     return active_speakers
+
 
 metadata = sieve.Metadata(
     title="Detect Active Speakers",
     description="State-of-the-art active speaker detection based on new, efficent face and speaker detection models.",
     tags=["Video", "Showcase"],
     code_url="https://github.com/sieve-community/fast-asd",
-    image=sieve.Image(url="https://storage.googleapis.com/sieve-public-data/asd/speaker-icon.webp"),
+    image=sieve.Image(
+        url="https://storage.googleapis.com/sieve-public-data/asd/speaker-icon.webp"),
     readme=open("README.md", "r").read(),
 )
+
 
 @sieve.function(
     name="active_speaker_detection",
@@ -119,7 +138,8 @@ def process(
         import os
         import subprocess
         new_path = file.path.replace(".webm", ".mp4")
-        subprocess.run(["ffmpeg", "-y", "-i", file.path, "-c", "copy", new_path])
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", file.path, "-c", "copy", new_path])
         file = sieve.File(path=new_path)
 
     width, height = get_video_dimensions(file.path)
@@ -132,12 +152,14 @@ def process(
         end_time = original_video_length
 
     if start_time < 0 or start_time > original_video_length:
-        raise ValueError(f"start_time must be between 0 and {original_video_length}")
+        raise ValueError(
+            f"start_time must be between 0 and {original_video_length}")
     if end_time < 0 or end_time > original_video_length:
-        raise ValueError(f"end_time must be between 0 and {original_video_length}")
+        raise ValueError(
+            f"end_time must be between 0 and {original_video_length}")
     if start_time >= end_time:
         raise ValueError(f"start_time must be less than end_time")
-    
+
     original_video = VideoSegment(
         path=file.path,
         start=start_time,
@@ -160,16 +182,19 @@ def process(
     # Define a wrapper function to call push_video_segments_to_object_detection and put the result in the Queue
     def object_detection_wrapper(original_video, file, result_queue, frame_interval):
         print("Pushing video to object detection...")
-        result = push_video_segments_to_object_detection(original_video, file, frame_interval=frame_interval, models=models, processing_fps=processing_fps)
+        result = push_video_segments_to_object_detection(
+            original_video, file, frame_interval=frame_interval, models=models, processing_fps=processing_fps)
         result_queue.put(result)
         print("Done pushing video to object detection")
-    
-    scene_detection_thread = threading.Thread(target=scene_detection_wrapper, args=(file, scene_detection_result), kwargs={'adaptive_threshold': True})
+
+    scene_detection_thread = threading.Thread(target=scene_detection_wrapper, args=(
+        file, scene_detection_result), kwargs={'adaptive_threshold': True})
     scene_detection_thread.start()
 
     num_frames_to_process = (end_time - start_time) * original_video_fps
     frame_interval = max(300, int(num_frames_to_process / 100))
-    object_detection_thread = threading.Thread(target=object_detection_wrapper, args=(original_video, file, object_detection_result, frame_interval))
+    object_detection_thread = threading.Thread(target=object_detection_wrapper, args=(
+        original_video, file, object_detection_result, frame_interval))
 
     object_detection_thread.start()
     object_detection_thread.join()
@@ -177,17 +202,21 @@ def process(
     scene_detection_thread.join()
     scene_future = scene_detection_result.get()
 
-    segments = create_video_segments(file, scene_future, start_time=start_time, end_time=end_time, fps=original_video_fps, original_video_length=original_video_length)
-    total_num_frames = original_video.end_frame if original_video.end_frame else int(original_video.end * original_video_fps)
+    segments = create_video_segments(file, scene_future, start_time=start_time, end_time=end_time,
+                                     fps=original_video_fps, original_video_length=original_video_length)
+    total_num_frames = original_video.end_frame if original_video.end_frame else int(
+        original_video.end * original_video_fps)
 
     speaker_detection_futures = []
-    total_num_frames = original_video.end_frame if original_video.end_frame else int(original_video.end * original_video.fps())
-    start = original_video.start_frame if original_video.start_frame else int(original_video.start * original_video.fps())
+    total_num_frames = original_video.end_frame if original_video.end_frame else int(
+        original_video.end * original_video.fps())
+    start = original_video.start_frame if original_video.start_frame else int(
+        original_video.start * original_video.fps())
     for i in range(start, total_num_frames, frame_interval):
         start_frame = i
         end_frame = min(i + frame_interval - 1, total_num_frames - 1)
         start = start_frame / original_video_fps
-        end = end_frame / original_video_fps            
+        end = end_frame / original_video_fps
         speaker_detection_futures.append({
             "future": None,
             "start": start_frame,
@@ -213,18 +242,22 @@ def process(
         for i in range(start, end + 1):
             frame_segment = None
             for segment in segments:
-                segment_start_frame = segment.start_frame if segment.start_frame else int(segment.start * original_video_fps)
-                segment_end_frame = segment.end_frame if segment.end_frame else int(segment.end * original_video_fps)
+                segment_start_frame = segment.start_frame if segment.start_frame else int(
+                    segment.start * original_video_fps)
+                segment_end_frame = segment.end_frame if segment.end_frame else int(
+                    segment.end * original_video_fps)
                 if i >= segment_start_frame and i <= segment_end_frame:
                     frame_segment = segment
                     break
             if frame_segment is None:
                 outputs_to_choose_from = face_detection_outputs
             else:
-                outputs_to_choose_from = [output for output in face_detection_outputs if output["frame_number"] >= segment_start_frame and output["frame_number"] <= segment_end_frame]
+                outputs_to_choose_from = [output for output in face_detection_outputs if output["frame_number"]
+                                          >= segment_start_frame and output["frame_number"] <= segment_end_frame]
             if len(outputs_to_choose_from) == 0:
                 continue
-            closest_frame = min(outputs_to_choose_from, key=lambda x: abs(x["frame_number"] - i))
+            closest_frame = min(outputs_to_choose_from,
+                                key=lambda x: abs(x["frame_number"] - i))
             # copy the boxes to avoid modifying the original and set the frame number to the current frame
             new_frame = {
                 "frame_number": i,
@@ -247,7 +280,7 @@ def process(
             out_str = out_str[:-1]
             out_str += "\n"
         return out_str
-    
+
     def get_relevant_face_detection_future(i):
         for j, future in enumerate(object_detection_futures):
             if "result" not in future and future["future"].done():
@@ -255,7 +288,8 @@ def process(
                     res = future["future"].result()
                     object_detection_futures[j]["result"] = res
                 except:
-                    print(f"WARNING: Found failed object detection (frame {future['start']}-{future['end']}), retrying...")
+                    print(
+                        f"WARNING: Found failed object detection (frame {future['start']}-{future['end']}), retrying...")
                     object_detection_futures[j]["future"] = sieve.function.get(OBJECT_DETECTION_MODEL).push(
                         file,
                         confidence_threshold=0.25,
@@ -275,13 +309,15 @@ def process(
                     object_detection_futures[i]["result"] = res
                     return res
                 except:
-                    print(f"WARNING: Object detection failed, retrying... Attempt {_+1}/10")
+                    print(
+                        f"WARNING: Object detection failed, retrying... Attempt {_+1}/10")
                     if "result" in object_detection_futures[i]:
                         del object_detection_futures[i]["result"]
                     object_detection_futures[i]["future"] = sieve.function.get(OBJECT_DETECTION_MODEL).push(
                         file,
                         confidence_threshold=0.25,
-                        start_frame=object_detection_futures[i]["start"], # start 10% into the segment to avoid scene boundaries
+                        # start 10% into the segment to avoid scene boundaries
+                        start_frame=object_detection_futures[i]["start"],
                         end_frame=object_detection_futures[i]["end"],
                         models=models,
                         # face_detection=False,
@@ -290,22 +326,27 @@ def process(
                         # interpolate_frames=True,
                         max_num_boxes=30,
                     )
-            raise Exception("Object detection failed 10 times, please try again later.")
-    
+            raise Exception(
+                "Object detection failed 10 times, please try again later.")
+
     def get_speaker_detection_payload(start, end, fps=30):
         # find all indices that contain the start and end
         def refresh_speakers():
             for i, future in enumerate(speaker_detection_futures):
-                in_range = (start >= future["start"] and start <= future["end"]) or (end >= future["start"] and end <= future["end"]) or (start <= future["start"] and end >= future["end"])
-                relevant_future_done = object_detection_futures[i]["future"].done()
+                in_range = (start >= future["start"] and start <= future["end"]) or (
+                    end >= future["start"] and end <= future["end"]) or (start <= future["start"] and end >= future["end"])
+                relevant_future_done = object_detection_futures[i]["future"].done(
+                )
                 if not future["future"] and (in_range or relevant_future_done):
                     # this means that we haven't pushed the video to speaker detection yet since face detection is not done
                     # lets find the relevant face detection future, wait for it to be done, and then push the video to speaker detection
                     res = list(get_relevant_face_detection_future(i))
-                    face_detection_outputs = convert_face_detection_outputs_to_string(res)
+                    face_detection_outputs = convert_face_detection_outputs_to_string(
+                        res)
                     speaker_detection_futures[i]["future"] = sieve.function.get(SPEAKER_DETECTION_MODEL).push(
                         file,
-                        start_time=future["start"] / fps, # start 10% into the segment to avoid scene boundaries
+                        # start 10% into the segment to avoid scene boundaries
+                        start_time=future["start"] / fps,
                         end_time=future["end"] / fps,
                         return_visualization=False,
                         face_boxes=face_detection_outputs,
@@ -319,21 +360,25 @@ def process(
                         if "result" not in speaker_detection_futures[i]:
                             while not speaker_detection_futures[i]["future"].done():
                                 import time
-                                time.sleep(0.1)
+                                time.sleep(5)
                                 refresh_speakers()
-                            speaker_detection_futures[i]["result"] = list(speaker_detection_futures[i]["future"].result())
+                            speaker_detection_futures[i]["result"] = list(
+                                speaker_detection_futures[i]["future"].result())
                         break  # if successful, break the retry loop
                     except Exception as e:
-                        print(f"WARNING: Speaker detection failed, retrying... Attempt {_+1}/10")
+                        print(
+                            f"WARNING: Speaker detection failed, retrying... Attempt {_+1}/10")
                         if "result" in speaker_detection_futures[i]:
                             del speaker_detection_futures[i]["result"]
                         # recreate the future
 
                         res = list(get_relevant_face_detection_future(i))
-                        face_detection_outputs = convert_face_detection_outputs_to_string(res)
+                        face_detection_outputs = convert_face_detection_outputs_to_string(
+                            res)
                         speaker_detection_futures[i]["future"] = sieve.function.get(SPEAKER_DETECTION_MODEL).push(
                             file,
-                            start_time=future["start"] / fps, # start 10% into the segment to avoid scene boundaries
+                            # start 10% into the segment to avoid scene boundaries
+                            start_time=future["start"] / fps,
                             end_time=future["end"] / fps,
                             return_visualization=False,
                             face_boxes=face_detection_outputs,
@@ -341,7 +386,8 @@ def process(
                         )
 
                 if "result" not in speaker_detection_futures[i]:
-                    raise Exception("Speaker detection failed 10 times, please try again later.")
+                    raise Exception(
+                        "Speaker detection failed 10 times, please try again later.")
                 data = speaker_detection_futures[i]["result"]
                 for frame in data:
                     if frame["frame_number"] >= start and frame["frame_number"] <= end:
@@ -351,10 +397,12 @@ def process(
         for i, future in enumerate(object_detection_futures):
             if "result" in future and speaker_detection_futures[i]["future"] is None:
                 res = list(get_relevant_face_detection_future(i))
-                face_detection_outputs = convert_face_detection_outputs_to_string(res)
+                face_detection_outputs = convert_face_detection_outputs_to_string(
+                    res)
                 speaker_detection_futures[i]["future"] = sieve.function.get(SPEAKER_DETECTION_MODEL).push(
                     file,
-                    start_time=future["start"] / fps, # start 10% into the segment to avoid scene boundaries
+                    # start 10% into the segment to avoid scene boundaries
+                    start_time=future["start"] / fps,
                     end_time=future["end"] / fps,
                     return_visualization=False,
                     face_boxes=face_detection_outputs,
@@ -366,37 +414,42 @@ def process(
                     res = speaker_detection_futures[i]["future"].result()
                     speaker_detection_futures[i]["result"] = res
                 except:
-                    print(f"WARNING: Found failed speaker detection (frame {future['start']}-{future['end']}), retrying...")
+                    print(
+                        f"WARNING: Found failed speaker detection (frame {future['start']}-{future['end']}), retrying...")
                     res = list(get_relevant_face_detection_future(i))
-                    face_detection_outputs = convert_face_detection_outputs_to_string(res)
+                    face_detection_outputs = convert_face_detection_outputs_to_string(
+                        res)
                     speaker_detection_futures[i]["future"] = sieve.function.get(SPEAKER_DETECTION_MODEL).push(
                         file,
-                        start_time=future["start"] / fps, # start 10% into the segment to avoid scene boundaries
+                        # start 10% into the segment to avoid scene boundaries
+                        start_time=future["start"] / fps,
                         end_time=future["end"] / fps,
                         return_visualization=False,
                         face_boxes=face_detection_outputs,
                         in_memory_threshold=SPEAKER_DETECTION_IN_MEMORY_THRESHOLD
                     )
                     continue
-        
+
         for i, future in enumerate(object_detection_futures):
             if "result" not in future and future["future"].done():
                 try:
                     res = future["future"].result()
                     object_detection_futures[i]["result"] = res
                 except:
-                    print(f"WARNING: Found failed object detection (frame {future['start']}-{future['end']}), retrying...")
+                    print(
+                        f"WARNING: Found failed object detection (frame {future['start']}-{future['end']}), retrying...")
                     object_detection_futures[i]["future"] = sieve.function.get(OBJECT_DETECTION_MODEL).push(
                         file,
                         confidence_threshold=0.25,
-                        start_frame=future["start"], # start 10% into the segment to avoid scene boundaries
+                        # start 10% into the segment to avoid scene boundaries
+                        start_frame=future["start"],
                         end_frame=future["end"],
                         models="yolov8n, yolov8n-face" if speed_boost else "yolov8l, yolov8l-face",
                         fps=processing_fps,
                         max_num_boxes=30,
                     )
                     continue
-        
+
         # loop over futures to see if any have errored, if so, recreate the future
         for i, future in enumerate(speaker_detection_futures):
             if "result" not in future and future["future"] and future["future"].done():
@@ -404,9 +457,11 @@ def process(
                     res = future["future"].result()
                     speaker_detection_futures[i]["result"] = res
                 except:
-                    print(f"WARNING: Found failed speaker detection (frame {future['start']}-{future['end']}), retrying...")
+                    print(
+                        f"WARNING: Found failed speaker detection (frame {future['start']}-{future['end']}), retrying...")
                     res = list(get_relevant_face_detection_future(i))
-                    face_detection_outputs = convert_face_detection_outputs_to_string(res)
+                    face_detection_outputs = convert_face_detection_outputs_to_string(
+                        res)
                     speaker_detection_futures[i]["future"] = sieve.function.get(SPEAKER_DETECTION_MODEL).push(
                         file,
                         start_time=future["start"] / fps,
@@ -421,8 +476,10 @@ def process(
     print("Video Informaton")
     print("Video Length: {:.2f}s".format(original_video_length))
     print("Video FPS: {:.2f}".format(original_video_fps))
-    start_frame = original_video.start_frame if original_video.start_frame else int(original_video.start * original_video_fps)
-    end_frame = original_video.end_frame if original_video.end_frame else int(original_video.end * original_video_fps)
+    start_frame = original_video.start_frame if original_video.start_frame else int(
+        original_video.start * original_video_fps)
+    end_frame = original_video.end_frame if original_video.end_frame else int(
+        original_video.end * original_video_fps)
     print("Start Time: ", start_time, f"(Frame {start_frame})")
     print("End Time: ", end_time, f"(Frame {end_frame})")
     print("Start Frame: ", start_frame)
@@ -433,7 +490,8 @@ def process(
 
     frame_count = 0
     for segment_index, segment in enumerate(segments):
-        print(f"Processing scene {segment_index} [{segment.start:.2f}s - {segment.end:.2f}s] / {end_time:.2f}s")
+        print(
+            f"Processing scene {segment_index} [{segment.start:.2f}s - {segment.end:.2f}s] / {end_time:.2f}s")
         start = segment.start
         end = segment.end
         fps = original_video_fps
@@ -446,7 +504,8 @@ def process(
             end_frame = round(end * fps)
 
         def get_frames():
-            speaker_payload = get_speaker_detection_payload(start_frame, end_frame, fps=fps)
+            speaker_payload = get_speaker_detection_payload(
+                start_frame, end_frame, fps=fps)
             frames = []
             last_frame_number = None
             for frame in speaker_payload:
@@ -485,7 +544,7 @@ def process(
                             height=original_video_height,
                         ))
                         for frame1 in frames:
-                            yield frame1                 
+                            yield frame1
                 else:
                     if last_frame_number and frames[-1].number - last_frame_number > 1:
                         frame_to_add_back = frames[-1]
@@ -539,7 +598,8 @@ def process(
                 })
 
             # sort by box size
-            out_boxes = sorted(out_boxes, key=lambda x: (x['x2'] - x['x1']) * (x['y2'] - x['y1']), reverse=True)
+            out_boxes = sorted(out_boxes, key=lambda x: (
+                x['x2'] - x['x1']) * (x['y2'] - x['y1']), reverse=True)
             # keep the max_num_faces largest boxes
             if len(out_boxes) > max_num_faces:
                 out_boxes = out_boxes[:max_num_faces]
@@ -563,10 +623,12 @@ def process(
             frame_count += 1
         if not return_scene_cuts_only and batch_frames:
             yield batch_frames
-        
+
+
 if __name__ == "__main__":
-    TEST_URL = "https://storage.googleapis.com/sieve-prod-us-central1-public-file-upload-bucket/d979a930-f2a5-4e0d-84fe-a9b233985c4e/dba9cbf3-8374-44bc-8d9d-cc9833d3f502-input-file.mp4"
+    # TEST_URL = "https://storage.googleapis.com/sieve-prod-us-central1-public-file-upload-bucket/d979a930-f2a5-4e0d-84fe-a9b233985c4e/dba9cbf3-8374-44bc-8d9d-cc9833d3f502-input-file.mp4"
     # change "url" to "path" if you want to test with a local file
-    file = sieve.File(url=TEST_URL)
+    file = sieve.File(
+        path="dba9cbf3-8374-44bc-8d9d-cc9833d3f502-input-file.mp4")
     for out in process(file):
         print(out)

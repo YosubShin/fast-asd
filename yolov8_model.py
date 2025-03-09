@@ -40,12 +40,12 @@ class YOLOv8:
     def __setup__(self):
         from ultralytics import YOLO
 
-        self.model = YOLO('/root/.models/yolov8l.pt')
-        self.fast_model = YOLO('/root/.models/yolov8n.pt')
-        self.face_model = YOLO("/root/.models/yolov8l-face.pt")
+        self.model = YOLO('.models/yolov8l.pt')
+        self.fast_model = YOLO('.models/yolov8n.pt')
+        self.face_model = YOLO(".models/yolov8l-face.pt")
         self.face_fast_model = self.face_model
-        self.world_model = YOLO('/root/.models/yolov8l-worldv2.pt')
-        self.world_fast_model = YOLO('/root/.models/yolov8s-worldv2.pt')
+        self.world_model = YOLO('.models/yolov8l-worldv2.pt')
+        self.world_fast_model = YOLO('.models/yolov8s-worldv2.pt')
         self.current_world_classes = None
         self.current_world_fast_classes = None
 
@@ -93,9 +93,9 @@ class YOLOv8:
         import torch
 
         # Check if CUDA is available
-        if not torch.cuda.is_available():
-            raise Exception(
-                "No CUDA devices are visible. Please check your CUDA setup.")
+        # if not torch.cuda.is_available():
+        #     raise Exception(
+        #         "No CUDA devices are visible. Please check your CUDA setup.")
 
         video_extensions = ["mp4", "avi", "mov",
                             "flv", "mkv", "wmv", "mpg", "mpeg", "m4v"]
@@ -179,6 +179,10 @@ class YOLOv8:
                 current_frame = cv2.cvtColor(current_frame, cv2.COLOR_RGB2BGR)
             except IndexError:
                 return [{"frame_number": current_frame_number, "boxes": []}]
+
+            total_frames_processed = 0
+            processing_start_time = time.time()
+
             for p in frames_number_to_read:
                 frame_to_process = None
                 if p == current_frame_number:
@@ -221,14 +225,18 @@ class YOLOv8:
 
                     output_dict = {"frame_number": p, "boxes": combined_boxes}
                     outputs.append(output_dict)
+                    total_frames_processed += 1
 
                 if len(outputs) % 100 == 0:
                     print(
                         f"Processed {round((len(outputs) / len(frames_number_to_read) * 100), 2)}% of frames ({len(outputs)} / {len(frames_number_to_read)})")
             cap.close()
             end_time = time.time()
+            processing_time = end_time - processing_start_time
             fps = len(outputs) / (end_time - start_time)
             print(f"Processing FPS: {fps}")
+            print(f"Total frames processed: {total_frames_processed}")
+            print(f"Total processing time: {round(processing_time, 2)}s")
             return outputs
         elif file_extension in image_extensions:
             image_path = file.path

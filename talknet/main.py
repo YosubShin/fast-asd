@@ -10,6 +10,7 @@ metadata = sieve.Metadata(
     readme=open("README.md", "r").read()
 )
 
+
 @sieve.Model(
     name="talknet-asd",
     python_packages=[
@@ -46,8 +47,9 @@ metadata = sieve.Metadata(
 )
 class TalkNetASD:
     def __setup__(self):
-        from demoTalkNet import setup
-        self.s, self.DET = setup()
+        from .demoTalkNet import setup
+        self.device = 'cpu'
+        self.s, self.DET = setup(device=self.device)
 
     def __predict__(
         self,
@@ -67,9 +69,15 @@ class TalkNetASD:
         :param in_memory_threshold: the maximum number of frames to load in memory at once. can speed up processing. if 0, this feature is disabled.
         :return: if return_visualization is True, the first element of the tuple is the output of the model, and the second element is the visualization of the video. Otherwise, the first element is the output of the model.
         """
+        import time
+        start_process_time = time.time()
+
+        print(
+            f"talknet __predict__ called with video: {video.path}, start_time: {start_time}, end_time: {end_time}, return_visualization: {return_visualization}")
         import gc
         gc.collect()
-        from demoTalkNet import main
+        from .demoTalkNet import main
+
         def transform_out(out):
             outputs = []
             for o in out:
@@ -78,13 +86,22 @@ class TalkNetASD:
                     "boxes": [b for b in o['faces']]
                 })
             return outputs
-            
+
         if return_visualization:
-            out, video_path = main(self.s, self.DET, video.path, start_seconds=start_time, end_seconds=end_time, return_visualization=return_visualization, face_boxes=face_boxes, in_memory_threshold=in_memory_threshold)
+            out, video_path = main(self.s, self.DET, video.path, start_seconds=start_time, end_seconds=end_time,
+                                   return_visualization=return_visualization, face_boxes=face_boxes, in_memory_threshold=in_memory_threshold, device=self.device)
+            end_process_time = time.time()
+            print(
+                f"Processing completed in {end_process_time - start_process_time:.2f} seconds")
             return sieve.Video(path=video_path)
         else:
-            out = main(self.s, self.DET, video.path, start_seconds=start_time, end_seconds=end_time, return_visualization=return_visualization, face_boxes=face_boxes, in_memory_threshold=in_memory_threshold)
+            out = main(self.s, self.DET, video.path, start_seconds=start_time, end_seconds=end_time,
+                       return_visualization=return_visualization, face_boxes=face_boxes, in_memory_threshold=in_memory_threshold, device=self.device)
+            end_process_time = time.time()
+            print(
+                f"Processing completed in {end_process_time - start_process_time:.2f} seconds")
             return transform_out(out)
+
 
 if __name__ == "__main__":
     TEST_URL = "https://storage.googleapis.com/sieve-prod-us-central1-public-file-upload-bucket/d979a930-f2a5-4e0d-84fe-a9b233985c4e/dba9cbf3-8374-44bc-8d9d-cc9833d3f502-input-file.mp4"
