@@ -281,3 +281,4 @@ venv.bak/
 .models
 .DS_Store
 *.jpg
+sieve_logs/
